@@ -113,6 +113,75 @@ const ImageModal = ({ image, onClose }) => {
   );
 };
 
+// Login Page Component
+const LoginPage = ({ onLogin, addNotification }) => {
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+
+  const handleLoginFormChange = (e) => {
+    const { name, value } = e.target;
+    setLoginForm({ ...loginForm, [name]: value });
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onLogin(loginForm);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-white rounded-xl shadow-xl w-full max-w-md p-8"
+      >
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-indigo-700 mb-2">Dayk Pharmacy</h1>
+          <p className="text-gray-600">Please login to continue</p>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="mb-6">
+            <label className="block text-gray-900 text-sm font-medium mb-1" htmlFor="email">
+              Email
+            </label>
+            <input
+              type="email"
+              id="email"
+              name="email"
+              value={loginForm.email}
+              onChange={handleLoginFormChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900"
+              required
+            />
+          </div>
+          <div className="mb-8">
+            <label className="block text-gray-900 text-sm font-medium mb-1" htmlFor="password">
+              Password
+            </label>
+            <input
+              type="password"
+              id="password"
+              name="password"
+              value={loginForm.password}
+              onChange={handleLoginFormChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900"
+              required
+            />
+          </div>
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            type="submit"
+            className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition"
+          >
+            Login
+          </motion.button>
+        </form>
+      </motion.div>
+    </div>
+  );
+};
+
 export default function PharmacySupplementManager() {
   // Notification system
   const { addNotification, NotificationContainer } = NotificationSystem();
@@ -120,7 +189,7 @@ export default function PharmacySupplementManager() {
 
   // Authentication state
   const [user, setUser] = useState(null);
-  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
 
   // Product state
@@ -154,8 +223,17 @@ export default function PharmacySupplementManager() {
 
   // Initialize Firebase data and auth state
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setUser(user);
+        // Check if user is admin (you might want to implement a more secure way)
+        const adminEmails = ['a@gmail.com']; // Add your admin emails here
+        setIsAdmin(adminEmails.includes(user.email));
+        await fetchData();
+      } else {
+        setUser(null);
+        setIsAdmin(false);
+      }
       setLoading(false);
     });
 
@@ -178,8 +256,6 @@ export default function PharmacySupplementManager() {
         addNotification('Failed to load data', 'error');
       }
     };
-
-    fetchData();
 
     return () => unsubscribe();
   }, [auth]);
@@ -242,15 +318,14 @@ export default function PharmacySupplementManager() {
   };
 
   // Authentication functions
-  const handleLogin = async (e) => {
-    e.preventDefault();
+  const handleLogin = async (credentials) => {
     try {
-      await signInWithEmailAndPassword(auth, loginForm.email, loginForm.password);
-      setShowLoginModal(false);
+      await signInWithEmailAndPassword(auth, credentials.email, credentials.password);
       addNotification('Login successful', 'success');
     } catch (error) {
       console.error("Login error:", error);
       addNotification('Invalid credentials', 'error');
+      throw error;
     }
   };
 
@@ -512,11 +587,6 @@ export default function PharmacySupplementManager() {
     }
   };
 
-  const handleLoginFormChange = (e) => {
-    const { name, value } = e.target;
-    setLoginForm({ ...loginForm, [name]: value });
-  };
-
   // Render supplement image
   const renderSupplementImage = (supplement) => {
     if (!supplement.image) {
@@ -563,6 +633,10 @@ export default function PharmacySupplementManager() {
     );
   }
 
+  if (!user) {
+    return <LoginPage onLogin={handleLogin} addNotification={addNotification} />;
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <NotificationContainer />
@@ -591,33 +665,37 @@ export default function PharmacySupplementManager() {
             transition={{ delay: 0.2 }}
             className="text-2xl font-bold text-indigo-700"
           >
-            Dayk Pharmacy 
+            Dayk Pharmacy
           </motion.h1>
 
           <div className="flex items-center space-x-4">
-            {user ? (
+            {user && (
               <>
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => {
-                    setShowAdminPanel(true);
-                    resetSupplementForm();
-                  }}
-                  className="flex items-center space-x-1 bg-indigo-600 text-white px-3 py-2 rounded-lg hover:bg-indigo-700 transition"
-                >
-                  <FiPlus size={18} />
-                  <span className="hidden sm:inline">Add Product</span>
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setShowCategoryManager(true)}
-                  className="flex items-center space-x-1 bg-purple-600 text-white px-3 py-2 rounded-lg hover:bg-purple-700 transition"
-                >
-                  <FiFilter size={18} />
-                  <span className="hidden sm:inline">Manage Categories</span>
-                </motion.button>
+                {isAdmin && (
+                  <>
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => {
+                        setShowAdminPanel(true);
+                        resetSupplementForm();
+                      }}
+                      className="flex items-center space-x-1 bg-indigo-600 text-white px-3 py-2 rounded-lg hover:bg-indigo-700 transition"
+                    >
+                      <FiPlus size={18} />
+                      <span className="hidden sm:inline">Add Product</span>
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => setShowCategoryManager(true)}
+                      className="flex items-center space-x-1 bg-purple-600 text-white px-3 py-2 rounded-lg hover:bg-purple-700 transition"
+                    >
+                      <FiFilter size={18} />
+                      <span className="hidden sm:inline">Manage Categories</span>
+                    </motion.button>
+                  </>
+                )}
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
@@ -628,16 +706,6 @@ export default function PharmacySupplementManager() {
                   <span className="hidden sm:inline">Logout</span>
                 </motion.button>
               </>
-            ) : (
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setShowLoginModal(true)}
-                className="flex items-center space-x-1 bg-indigo-600 text-white px-3 py-2 rounded-lg hover:bg-indigo-700 transition"
-              >
-                <FiUser size={18} />
-                <span className="hidden sm:inline">Login</span>
-              </motion.button>
             )}
           </div>
         </div>
@@ -716,20 +784,19 @@ export default function PharmacySupplementManager() {
         >
           {filteredSupplements.length > 0 ? (
             filteredSupplements.map(supplement => (
-            <motion.div
-              key={supplement.id}
-              layout
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-              className={`bg-white rounded-xl overflow-hidden transition-all duration-300 ${
-                supplement.quantity === 0
-                  ? 'shadow-[0_0_30px_#fecaca] border border-red-400'
-                  : 'shadow-lg hover:shadow-lg'
-              }`}
-            >
-
+              <motion.div
+                key={supplement.id}
+                layout
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                className={`bg-white rounded-xl overflow-hidden transition-all duration-300 ${
+                  supplement.quantity === 0
+                    ? 'shadow-[0_0_30px_#fecaca] border-2 border-red-500 transform scale-[1.01]'
+                    : 'shadow-lg hover:shadow-xl'
+                }`}
+              >
                 {renderSupplementImage(supplement)}
                 <div className="p-4">
                   <div className="flex justify-between items-start">
@@ -744,14 +811,14 @@ export default function PharmacySupplementManager() {
                       {formatPrice(supplement.price)}
                     </span>
                     <span className={`text-sm font-medium ${
-                      supplement.quantity > 0 ? 'text-green-600' : 'text-red-600'
+                      supplement.quantity > 0 ? 'text-green-600' : 'text-red-600 font-bold'
                     }`}>
-                      {supplement.quantity > 0 ? `In Stock: ${supplement.quantity}` : 'Out of Stock'}
+                      {supplement.quantity > 0 ? `In Stock: ${supplement.quantity}` : 'OUT OF STOCK'}
                     </span>
                   </div>
                   <div className="mt-4 flex justify-between items-center">
                     <span className="text-xs text-gray-600">Barcode: {supplement.barcode}</span>
-                    {user && (
+                    {isAdmin && (
                       <div className="flex space-x-3">
                         <motion.button
                           whileHover={{ scale: 1.1 }}
@@ -805,78 +872,6 @@ export default function PharmacySupplementManager() {
           )}
         </motion.div>
       </main>
-
-      {/* Login Modal */}
-      <AnimatePresence>
-        {showLoginModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
-          >
-            <motion.div
-              variants={modalVariants}
-              initial="hidden"
-              animate="visible"
-              exit="exit"
-              className="bg-white rounded-xl shadow-xl w-full max-w-md"
-            >
-              <div className="p-6">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-2xl font-bold text-gray-900">Login</h2>
-                  <button
-                    onClick={() => setShowLoginModal(false)}
-                    className="text-gray-600 hover:text-gray-800"
-                  >
-                    <FiX size={24} />
-                  </button>
-                </div>
-                <form onSubmit={handleLogin}>
-                  <div className="mb-4">
-                    <label className="block text-gray-900 text-sm font-medium mb-1" htmlFor="email">
-                      Email
-                    </label>
-                    <input
-                      type="email"
-                      id="email"
-                      name="email"
-                      value={loginForm.email}
-                      onChange={handleLoginFormChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900"
-                      required
-                    />
-                  </div>
-                  <div className="mb-6">
-                    <label className="block text-gray-900 text-sm font-medium mb-1" htmlFor="password">
-                      Password
-                    </label>
-                    <input
-                      type="password"
-                      id="password"
-                      name="password"
-                      value={loginForm.password}
-                      onChange={handleLoginFormChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900"
-                      required
-                    />
-                  </div>
-                  <div className="flex justify-end">
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      type="submit"
-                      className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition w-full"
-                    >
-                      Login
-                    </motion.button>
-                  </div>
-                </form>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Admin Panel Modal */}
       <AnimatePresence>
