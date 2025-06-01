@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { FiUser, FiLock, FiPlus, FiEdit2, FiTrash2, FiSearch, FiFilter, FiX, FiCheck, FiLogOut, FiImage, FiUpload } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { db } from '../firebase';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, writeBatch } from 'firebase/firestore';
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 import imageCompression from 'browser-image-compression';
 
@@ -80,6 +80,39 @@ const NotificationSystem = () => {
   };
 };
 
+// Image Modal Component
+const ImageModal = ({ image, onClose }) => {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.9 }}
+        animate={{ scale: 1 }}
+        exit={{ scale: 0.9 }}
+        className="max-w-full max-h-full"
+        onClick={e => e.stopPropagation()}
+      >
+        <img
+          src={image}
+          alt="Enlarged view"
+          className="max-w-full max-h-[80vh] object-contain"
+        />
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 text-white bg-black bg-opacity-50 rounded-full p-2 hover:bg-opacity-70 transition"
+        >
+          <FiX size={24} />
+        </button>
+      </motion.div>
+    </motion.div>
+  );
+};
+
 export default function PharmacySupplementManager() {
   // Notification system
   const { addNotification, NotificationContainer } = NotificationSystem();
@@ -93,10 +126,15 @@ export default function PharmacySupplementManager() {
   // Product state
   const [supplements, setSupplements] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState(['All']);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [selectedImage, setSelectedImage] = useState(null);
 
   // Admin panel state
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [editSupplement, setEditSupplement] = useState(null);
+  const [newCategory, setNewCategory] = useState('');
   const [supplementForm, setSupplementForm] = useState({
     name: '',
     description: '',
@@ -121,27 +159,30 @@ export default function PharmacySupplementManager() {
       setLoading(false);
     });
 
-    const fetchSupplements = async () => {
+    const fetchData = async () => {
       try {
-        const querySnapshot = await getDocs(collection(db, "supplements"));
-        const supplementsData = querySnapshot.docs.map(doc => ({
+        // Fetch supplements
+        const supplementsSnapshot = await getDocs(collection(db, "supplements"));
+        const supplementsData = supplementsSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         }));
         setSupplements(supplementsData);
+
+        // Fetch categories
+        const categoriesSnapshot = await getDocs(collection(db, "categories"));
+        const categoriesData = categoriesSnapshot.docs.map(doc => doc.data().name);
+        setCategories(['All', ...new Set(categoriesData)]);
       } catch (error) {
-        console.error("Error fetching supplements: ", error);
-        addNotification('Failed to load supplements', 'error');
+        console.error("Error fetching data: ", error);
+        addNotification('Failed to load data', 'error');
       }
     };
 
-    fetchSupplements();
+    fetchData();
 
     return () => unsubscribe();
   }, [auth]);
-
-  // Categories derived from supplements
-  const categories = ['All', ...new Set(supplements.map(item => item.category).filter(Boolean))];
 
   // Filtered supplements based on search and category
   const filteredSupplements = supplements.filter(supplement => {
@@ -188,7 +229,7 @@ export default function PharmacySupplementManager() {
 
       // Convert to Base64 string
       const base64Image = await convertToBase64(compressedFile);
-      
+
       addNotification('Image processed successfully', 'success');
       return base64Image;
     } catch (error) {
@@ -360,6 +401,77 @@ export default function PharmacySupplementManager() {
     }
   };
 
+  // Category management functions
+  const handleAddCategory = async () => {
+    if (!newCategory.trim()) {
+      addNotification('Please enter a category name', 'error');
+      return;
+    }
+
+    if (categories.includes(newCategory)) {
+      addNotification('Category already exists', 'error');
+      return;
+    }
+
+    try {
+      // Add to Firestore
+      await addDoc(collection(db, "categories"), {
+        name: newCategory.trim(),
+        createdAt: new Date()
+      });
+
+      // Update local state
+      setCategories([...categories, newCategory.trim()]);
+      setNewCategory('');
+      addNotification('Category added successfully', 'success');
+    } catch (error) {
+      console.error("Error adding category: ", error);
+      addNotification('Failed to add category', 'error');
+    }
+  };
+
+  const handleDeleteCategory = async (category) => {
+    if (category === 'All') {
+      addNotification('Cannot delete the default category', 'error');
+      return;
+    }
+
+    if (window.confirm(`Are you sure you want to delete the category "${category}"?`)) {
+      try {
+        // First, update all supplements with this category to 'General'
+        const batch = writeBatch(db);
+        const supplementsRef = collection(db, "supplements");
+        const q = query(supplementsRef, where("category", "==", category));
+        const querySnapshot = await getDocs(q);
+
+        querySnapshot.forEach((doc) => {
+          batch.update(doc.ref, { category: 'General' });
+        });
+
+        // Then delete the category
+        const categoriesRef = collection(db, "categories");
+        const categoriesQuery = query(categoriesRef, where("name", "==", category));
+        const categoriesSnapshot = await getDocs(categoriesQuery);
+
+        categoriesSnapshot.forEach((doc) => {
+          batch.delete(doc.ref);
+        });
+
+        await batch.commit();
+
+        // Update local state
+        setCategories(categories.filter(c => c !== category));
+        setSupplements(supplements.map(supplement =>
+          supplement.category === category ? { ...supplement, category: 'General' } : supplement
+        ));
+        addNotification('Category deleted successfully', 'success');
+      } catch (error) {
+        console.error("Error deleting category: ", error);
+        addNotification('Failed to delete category', 'error');
+      }
+    }
+  };
+
   const resetSupplementForm = () => {
     setSupplementForm({
       name: '',
@@ -367,7 +479,7 @@ export default function PharmacySupplementManager() {
       price: '',
       quantity: '',
       barcode: '',
-      category: categories.length > 1 ? categories[1] : '',
+      category: categories.length > 1 ? categories[1] : 'General',
       image: null
     });
     setImagePreview(null);
@@ -379,12 +491,12 @@ export default function PharmacySupplementManager() {
     if (name === 'image') {
       const file = files[0];
       if (!file) return;
-      
+
       if (!file.type.startsWith('image/')) {
         addNotification('Please upload an image file', 'error');
         return;
       }
-      
+
       if (file.size > 5 * 1024 * 1024) { // 5MB limit
         addNotification('Image must be smaller than 5MB', 'error');
         return;
@@ -416,9 +528,15 @@ export default function PharmacySupplementManager() {
     }
 
     return (
-      <div className="w-full h-48 bg-gray-200 flex items-center justify-center overflow-hidden">
-        <img 
-          src={supplement.image} 
+      <div
+        className="w-full h-48 bg-gray-200 flex items-center justify-center overflow-hidden cursor-pointer"
+        onClick={() => {
+          setSelectedImage(supplement.image);
+          setShowImageModal(true);
+        }}
+      >
+        <img
+          src={supplement.image}
           alt={supplement.name}
           className="w-full h-full object-cover"
           loading="lazy"
@@ -449,6 +567,16 @@ export default function PharmacySupplementManager() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <NotificationContainer />
 
+      {/* Image Modal */}
+      <AnimatePresence>
+        {showImageModal && (
+          <ImageModal
+            image={selectedImage}
+            onClose={() => setShowImageModal(false)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <motion.header
         initial={{ y: -100 }}
@@ -463,7 +591,7 @@ export default function PharmacySupplementManager() {
             transition={{ delay: 0.2 }}
             className="text-2xl font-bold text-indigo-700"
           >
-            PharmaSupps Inventory
+            Dayk Pharmacy 
           </motion.h1>
 
           <div className="flex items-center space-x-4">
@@ -480,6 +608,15 @@ export default function PharmacySupplementManager() {
                 >
                   <FiPlus size={18} />
                   <span className="hidden sm:inline">Add Product</span>
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setShowCategoryManager(true)}
+                  className="flex items-center space-x-1 bg-purple-600 text-white px-3 py-2 rounded-lg hover:bg-purple-700 transition"
+                >
+                  <FiFilter size={18} />
+                  <span className="hidden sm:inline">Manage Categories</span>
                 </motion.button>
                 <motion.button
                   whileHover={{ scale: 1.05 }}
@@ -523,7 +660,7 @@ export default function PharmacySupplementManager() {
               <input
                 type="text"
                 placeholder="Search by name or barcode..."
-                className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                className="pl-10 pr-4 text-gray-500 py-2 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -579,15 +716,20 @@ export default function PharmacySupplementManager() {
         >
           {filteredSupplements.length > 0 ? (
             filteredSupplements.map(supplement => (
-              <motion.div
-                key={supplement.id}
-                layout
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-                className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg transition"
-              >
+            <motion.div
+              key={supplement.id}
+              layout
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+              className={`bg-white rounded-xl overflow-hidden transition-all duration-300 ${
+                supplement.quantity === 0
+                  ? 'shadow-[0_0_30px_#fecaca] border border-red-400'
+                  : 'shadow-lg hover:shadow-lg'
+              }`}
+            >
+
                 {renderSupplementImage(supplement)}
                 <div className="p-4">
                   <div className="flex justify-between items-start">
@@ -601,7 +743,7 @@ export default function PharmacySupplementManager() {
                     <span className="text-lg font-bold text-indigo-700">
                       {formatPrice(supplement.price)}
                     </span>
-                    <span className={`text-sm ${
+                    <span className={`text-sm font-medium ${
                       supplement.quantity > 0 ? 'text-green-600' : 'text-red-600'
                     }`}>
                       {supplement.quantity > 0 ? `In Stock: ${supplement.quantity}` : 'Out of Stock'}
@@ -610,10 +752,10 @@ export default function PharmacySupplementManager() {
                   <div className="mt-4 flex justify-between items-center">
                     <span className="text-xs text-gray-600">Barcode: {supplement.barcode}</span>
                     {user && (
-                      <div className="flex space-x-2">
+                      <div className="flex space-x-3">
                         <motion.button
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
                           onClick={() => {
                             setEditSupplement(supplement);
                             setSupplementForm({
@@ -622,13 +764,13 @@ export default function PharmacySupplementManager() {
                               price: supplement.price.toString(),
                               quantity: supplement.quantity.toString(),
                               barcode: supplement.barcode,
-                              category: supplement.category || '',
+                              category: supplement.category || 'General',
                               image: supplement.image
                             });
                             setImagePreview(supplement.image || null);
                             setShowAdminPanel(true);
                           }}
-                          className="text-indigo-600 hover:text-indigo-800 p-1"
+                          className="text-indigo-600 hover:text-indigo-800 p-2 rounded-full hover:bg-indigo-100 transition"
                           title="Edit"
                         >
                           <FiEdit2 size={18} />
@@ -637,7 +779,7 @@ export default function PharmacySupplementManager() {
                           whileHover={{ scale: 1.1 }}
                           whileTap={{ scale: 0.9 }}
                           onClick={() => handleDeleteSupplement(supplement.id)}
-                          className="text-red-600 hover:text-red-800 p-1"
+                          className="text-red-600 hover:text-red-800 p-2 rounded-full hover:bg-red-100 transition"
                           title="Delete"
                         >
                           <FiTrash2 size={18} />
@@ -941,6 +1083,98 @@ export default function PharmacySupplementManager() {
                     </motion.button>
                   </div>
                 </form>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Category Manager Modal */}
+      <AnimatePresence>
+        {showCategoryManager && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          >
+            <motion.div
+              variants={modalVariants}
+              initial="hidden"
+              animate="visible"
+              exit="exit"
+              className="bg-white rounded-xl shadow-xl w-full max-w-md"
+            >
+              <div className="p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-2xl font-bold text-gray-900">Manage Categories</h2>
+                  <button
+                    onClick={() => {
+                      setShowCategoryManager(false);
+                      setNewCategory('');
+                    }}
+                    className="text-gray-600 hover:text-gray-800"
+                  >
+                    <FiX size={24} />
+                  </button>
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-gray-900 text-sm font-medium mb-1">
+                    Add New Category
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newCategory}
+                      onChange={(e) => setNewCategory(e.target.value)}
+                      className="flex-grow px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900"
+                      placeholder="Enter category name"
+                    />
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={handleAddCategory}
+                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+                    >
+                      Add
+                    </motion.button>
+                  </div>
+                </div>
+
+                <div className="mt-6">
+                  <h3 className="text-lg font-medium text-gray-900 mb-3">Existing Categories</h3>
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {categories.filter(c => c !== 'All').map(category => (
+                      <div
+                        key={category}
+                        className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                      >
+                        <span className="text-gray-900">{category}</span>
+                        <motion.button
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                          onClick={() => handleDeleteCategory(category)}
+                          className="text-red-600 hover:text-red-800 p-1 rounded-full hover:bg-red-100 transition"
+                          title="Delete category"
+                        >
+                          <FiTrash2 size={18} />
+                        </motion.button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-6 flex justify-end">
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setShowCategoryManager(false)}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-gray-900 bg-white hover:bg-gray-50"
+                  >
+                    Close
+                  </motion.button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
