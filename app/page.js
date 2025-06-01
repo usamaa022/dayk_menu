@@ -227,7 +227,7 @@ export default function PharmacySupplementManager() {
       if (user) {
         setUser(user);
         // Check if user is admin (you might want to implement a more secure way)
-        const adminEmails = ['a@gmail.com']; // Add your admin emails here
+        const adminEmails = ['dryassin@gmail.com']; // Add your admin emails here
         setIsAdmin(adminEmails.includes(user.email));
         await fetchData();
       } else {
