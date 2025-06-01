@@ -9,7 +9,11 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.8",
     "@zxing/library": "^0.21.3",
+    "browser-image-compression": "^2.0.2",
+    "firebase": "^11.8.1",
+    "motion": "^12.15.0",
     "next": "^15.3.2",
     "react": "^19.0.0",
     "react-barcode-scanner": "^4.0.0",
