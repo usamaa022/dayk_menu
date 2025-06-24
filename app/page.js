@@ -135,7 +135,7 @@ const LoginPage = ({ onLogin, addNotification }) => {
         className="bg-white rounded-xl shadow-xl w-full max-w-md p-8"
       >
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-indigo-700 mb-2">Dayk Pharmacy</h1>
+          <h1 className="text-3xl font-bold text-indigo-700 mb-2"></h1>
           <p className="text-gray-600">Please login to continue</p>
         </div>
 
@@ -665,9 +665,11 @@ export default function PharmacySupplementManager() {
             transition={{ delay: 0.2 }}
             className="text-2xl font-bold text-indigo-700"
           >
-            Dayk Pharmacy
+            
           </motion.h1>
 
+           
+          
           <div className="flex items-center space-x-4">
             {user && (
               <>
